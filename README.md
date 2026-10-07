@@ -1,120 +1,217 @@
 # Study Foundation Model
 
-This repository contains evaluation code for studying segmentation foundation models.
+This repository contains evaluation utilities for segmentation foundation models.
 
-## SAM3 IoU Evaluation
+The current workflow evaluates **text-prompted SAM3 segmentation masks** using **Intersection over Union (IoU)** and supports batch execution over multiple experimental conditions.
 
-`test_IoU.py` evaluates segmentation masks predicted by SAM3 from a text prompt using **Intersection over Union (IoU)**.
-
-The script supports two evaluation modes:
-
-- **Semantic segmentation**
-- **Instance segmentation**
-
-Bounding boxes and SAM3 confidence scores are not used for the evaluation.
-
-## Evaluation Flow
-
-1. Load an input image.
-2. Run SAM3 with a text prompt.
-3. Obtain the predicted masks.
-4. Binarize the predicted masks.
-5. Load the corresponding ground-truth mask(s).
-6. Calculate IoU.
-
-## Semantic Segmentation
-
-For semantic segmentation, all masks predicted from the same text prompt are merged into a single binary mask.
-
-For example, if the prompt is:
+## Files
 
 ```text
-screw
+.
+├── test_IoU.py
+├── run_all.sh
+├── prompts.tsv
+└── README.md
 ```
 
-and SAM3 predicts three screw masks, the masks are combined using a logical OR operation.
+- `test_IoU.py`: Runs SAM3 inference and IoU evaluation.
+- `run_all.sh`: Automatically runs all existing dataset conditions.
+- `prompts.tsv`: Defines one or more text prompts for each object.
 
-The merged prediction is then compared with the semantic ground-truth mask.
+## Dataset Structure
 
-### Ground-truth structure
+`Data` and `GT` are assumed to have the same hierarchy.
 
 ```text
-gt/
-└── semantic/
-    ├── image001.png
-    ├── image002.png
+Data/
+├── Sensor1/
+│   ├── objectA/
+│   │   ├── 1/
+│   │   └── 4/
+│   └── objectB/
+│       └── 1/
+└── Sensor2/
     └── ...
 ```
 
-## Instance Segmentation
-
-For instance segmentation, each predicted mask is compared with each ground-truth instance mask.
-
-The script creates an IoU matrix and matches predicted and ground-truth instances one-to-one based on IoU.
-
-Unmatched predictions or ground-truth instances are treated as IoU = 0 when calculating the image-level mean IoU.
-
-### Ground-truth structure
-
 ```text
-gt/
-└── instance/
-    ├── image001/
-    │   ├── 000.png
-    │   ├── 001.png
-    │   └── ...
-    ├── image002/
-    │   ├── 000.png
-    │   └── ...
+GT/
+├── Sensor1/
+│   ├── objectA/
+│   │   ├── 1/
+│   │   └── 4/
+│   └── objectB/
+│       └── 1/
+└── Sensor2/
     └── ...
 ```
 
-## Usage
+Each level corresponds to:
 
-### Semantic segmentation
-
-```bash
-python test_IoU.py \
-    --image_dir ./images \
-    --gt_dir ./gt \
-    --segmentation_type semantic \
-    --prompt "screw"
+```text
+Sensor / Object / Number of objects
 ```
 
-### Instance segmentation
+For example:
 
-```bash
-python test_IoU.py \
-    --image_dir ./images \
-    --gt_dir ./gt \
-    --segmentation_type instance \
-    --prompt "screw"
+```text
+Data/RealSense/cup/4/
 ```
 
-## Main Arguments
+is paired automatically with:
 
-| Argument | Description |
+```text
+GT/RealSense/cup/4/
+```
+
+## Multiple Prompts for One Object
+
+Multiple prompts can be tested for the same object by using `prompts.tsv`.
+
+Example:
+
+```text
+object	prompt_id	prompt
+cup	p01	mug
+cup	p02	cup
+cup	p03	drinking cup
+screw	p01	screw
+screw	p02	metal screw
+```
+
+The file is tab-separated.
+
+| Column | Description |
 |---|---|
-| `--image_dir` | Directory containing input images |
-| `--gt_dir` | Root directory containing ground-truth masks |
-| `--segmentation_type` | `semantic` or `instance` |
-| `--prompt` | Text prompt given to SAM3 |
-| `--output_dir` | Directory for overlay images |
-| `--csv_out` | Output CSV file for IoU results |
-| `--threshold` | Threshold used to binarize predicted masks |
+| `object` | Object directory name |
+| `prompt_id` | Short identifier used for organizing results |
+| `prompt` | Text prompt passed to SAM3 |
 
-## Output
+For example, the object `cup` is evaluated three times with:
 
-The script outputs:
+```text
+mug
+cup
+drinking cup
+```
 
-- IoU for each evaluated image
-- Mean IoU over the dataset
-- Number of predicted and ground-truth instances
-- Overlay images of the predicted masks
-- A CSV file containing the evaluation results
+Using `prompt_id` prevents different prompt results from overwriting each other.
 
-## Notes
+## Batch Evaluation
 
-This repository is intended for experimental evaluation of segmentation foundation models.
+`run_all.sh` evaluates all existing combinations of:
 
-The current implementation focuses on evaluating **text-prompted SAM3 segmentation masks** using IoU.
+```text
+Sensor × Object × Number of objects × Prompt
+```
+
+The script reads the directory structure under `Data/`, finds the corresponding GT path, and then runs every prompt registered for that object.
+
+Nonexistent dataset combinations are not generated.
+
+If a corresponding GT directory is missing, that condition is skipped.
+
+If an object has no entry in `prompts.tsv`, that object is skipped.
+
+## Configuration
+
+The following values can be changed at the top of `run_all.sh`:
+
+```bash
+DATA_ROOT="./Data"
+GT_ROOT="./GT"
+RESULT_ROOT="./results"
+PROMPT_FILE="./prompts.tsv"
+SEGMENTATION_TYPE="semantic"
+PYTHON_SCRIPT="./test_IoU.py"
+```
+
+`SEGMENTATION_TYPE` should be either:
+
+```text
+semantic
+```
+
+or:
+
+```text
+instance
+```
+
+## Running the Shell Script
+
+Give the script execution permission once:
+
+```bash
+chmod +x run_all.sh
+```
+
+Then run:
+
+```bash
+./run_all.sh
+```
+
+Alternatively:
+
+```bash
+bash run_all.sh
+```
+
+## Example Command
+
+For the condition:
+
+```text
+Sensor      = RealSense
+Object      = cup
+Num objects = 4
+Prompt      = drinking cup
+```
+
+the script executes a command equivalent to:
+
+```bash
+python test_IoU.py \
+    --image_dir "./Data/RealSense/cup/4" \
+    --gt_dir "./GT/RealSense/cup/4" \
+    --segmentation_type semantic \
+    --prompt "drinking cup" \
+    --camera_type "RealSense" \
+    --object_name "cup" \
+    --num_objects "4" \
+    --output_dir "./results/RealSense/cup/4/p03/overlay" \
+    --csv_out "./results/RealSense/cup/4/p03/iou_results.csv"
+```
+
+If your local `test_IoU.py` uses different command-line option names, edit the corresponding options in `run_all.sh`.
+
+## Output Structure
+
+Results are saved separately for each prompt.
+
+```text
+results/
+└── RealSense/
+    └── cup/
+        └── 4/
+            ├── p01/
+            │   ├── overlay/
+            │   └── iou_results.csv
+            ├── p02/
+            │   ├── overlay/
+            │   └── iou_results.csv
+            └── p03/
+                ├── overlay/
+                └── iou_results.csv
+```
+
+This structure makes it easy to compare different prompts under the same experimental condition.
+
+## Evaluation Notes
+
+The IoU evaluation uses the segmentation masks predicted from the text prompt.
+
+Bounding boxes and SAM3 confidence scores are not required for the IoU evaluation itself.
+
+The public repository can document the evaluation interface and workflow without including confidential dataset-specific implementation details.
